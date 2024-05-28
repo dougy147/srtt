@@ -265,7 +265,7 @@ int main(void)
 		else if (answer == KEY_N) { answer = 3; }
 
 		// block; item; time_diff; time_diff_total; answer; expected_reg; expected_irreg; showed; current_seq (reg or irreg)
-		fprintf(fp, "%d;%d;%"PRIu64";%"PRIu64";%d;%d;%d;%d,%d\n", current_block_nb, current_stimulus_nb, time_diff, time_diff_total, answer, reg_item, irreg_item, item, current_seq); // write to log file
+		fprintf(fp, "%d;%d;%"PRIu64";%"PRIu64";%d;%d;%d;%d;%d\n", current_block_nb, current_stimulus_nb, time_diff, time_diff_total, answer, reg_item, irreg_item, item, current_seq); // write to log file
 
 	        update_context(context, CONTEXT_SIZE, item);
 	        reg_item    = next_expected(context, REGULAR_SEQUENCE, RSEQ, ISEQ, CONTEXT_SIZE, SEQUENCE_SIZE);
