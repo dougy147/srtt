@@ -178,7 +178,8 @@ int main(void)
     int    RSEQ[SEQUENCE_SIZE]; // regular learning sequence (85%)
     int    ISEQ[SEQUENCE_SIZE]; // irregular learning sequence (15%)
 
-    int LEARNING_SEQ = 2; // choose between 1 and 2
+    //int LEARNING_SEQ = 2; // choose between 1 and 2
+    int LEARNING_SEQ = (rand() < RAND_MAX * 0.5) ? 1 : 2; // randomize regular sequence selection
 
     if      (LEARNING_SEQ == 1) {
 	for (int i = 0; i < SEQUENCE_SIZE; i++) {
