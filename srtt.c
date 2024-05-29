@@ -6,16 +6,18 @@
 #include <time.h>
 #include <inttypes.h> // print uint64_t (timer)
 
-#define NB_ARROWS    4     // Number of possible items on screen
-#define NB_BLOCKS    8     // Blocks are cut with pauses
-#define NB_STIMULI   120   // Number of stimuli by block
-#define CONTEXT_SIZE 2     // Sequence context
-#define SOA          0.250 // Stimulus Onset Asynchrony (in seconds)
-#define P_REG        0.85  // Regular sequence probability
+#define NB_PLACEHOLDERS     4     // Number of possible items on screen
+#define NB_BLOCKS    	    8     // Blocks are cut with pauses
+#define NB_STIMULI   	    120   // Number of stimuli by block
+#define CONTEXT_SIZE 	    2     // Sequence context
+#define SOA          	    0.250 // Stimulus Onset Asynchrony (in seconds)
+#define P_REG        	    0.85  // Regular sequence probability
 
-#define BG_COLOR      BLACK // Background color
-#define ARROWS_COLOR  DARKGRAY
-#define STIMULI_COLOR WHITE
+#define PLACEHOLDERS_TYPE   HANGMAN // Choice ARROW, HANGMAN
+
+#define BG_COLOR            BLACK // Background color
+#define PLACEHOLDERS_COLOR  DARKGRAY
+#define STIMULI_COLOR       WHITE
 
 ///////////////////////////////////////////////////////////
 /*
@@ -27,33 +29,52 @@
 enum {
     REGULAR_SEQUENCE,
     IRREGULAR_SEQUENCE,
+} Sequence;
+
+/*placeholders can be arrows above stimulus or rectangles under (hangman)*/
+enum {
+    ARROW,
+    HANGMAN,
 };
 
-typedef struct Arrow {
-    Vector2 size; // vertical line size
-    Vector2 pos;  // vertical line position
-    Vector2 v1;   // left vertex of the arrow triangle
-    Vector2 v2;   // center vertex of the arrow triangle
-    Vector2 v3;   // right vertex of the arrow triangle
-    int index;
-    int dot_padding; // stimuli padding
-    int dot_radius;  // stimuli are circles
-} Arrow;
+typedef struct Placeholder {
+    Vector2 size; // vertical line (if arrow) / rect width (if hangman)
+    Vector2 pos;  // placeholder position
+    int index;    // Placeholders are indexed given their position from left to right on screen
+    int stimulus_pos; // where to place the stimulus relatively to placeholder
+    Vector2 v1;   // (arrows only) left vertex of the arrow triangle
+    Vector2 v2;   // (arrows only) center vertex of the arrow triangle
+    Vector2 v3;   // (arrows only) right vertex of the arrow triangle
+    int type;     // stores its own type (arrow, hangman, etc.)
+} Placeholder;
 
-void draw_arrows(Arrow *arrows)
+typedef struct Stimulus {
+    int radius; // stimuli are circle for now
+} Stimulus;
+
+void draw_placeholders(Placeholder *ph)
 {
-    for (int i = 0; i < NB_ARROWS; i++) {
-        DrawRectangleV(arrows[i].pos, arrows[i].size, ARROWS_COLOR);
-        DrawTriangle(arrows[i].v1,arrows[i].v2,arrows[i].v3, ARROWS_COLOR);
+    switch (ph[0].type) {
+	case ARROW:
+	    for (int i = 0; i < NB_PLACEHOLDERS; i++) {
+    	        DrawRectangleV(ph[i].pos, ph[i].size,    PLACEHOLDERS_COLOR);
+    	        DrawTriangle(ph[i].v1,ph[i].v2,ph[i].v3, PLACEHOLDERS_COLOR);
+    	    }
+	    break;
+	case HANGMAN:
+	    for (int i = 0; i < NB_PLACEHOLDERS; i++) {
+    	        DrawRectangleV(ph[i].pos, ph[i].size, PLACEHOLDERS_COLOR);
+    	    }
+	    break;
     }
 }
 
-void draw_dot(Arrow *arrows, int arrow_index, Color sequence_color)
+void draw_stimulus(Placeholder *arrows, int arrow_index, Color sequence_color, Stimulus stimulus)
 {
     DrawCircle(
 	    arrows[arrow_index].pos.x + (arrows[arrow_index].size.x / 2),
-	    arrows[arrow_index].pos.y + arrows[arrow_index].size.y + (arrows[arrow_index].v2.y - arrows[arrow_index].v1.y) + arrows[arrow_index].dot_padding + arrows[arrow_index].dot_radius,
-	    arrows[arrow_index].dot_radius,
+	    arrows[arrow_index].pos.y + arrows[arrow_index].size.y + (arrows[arrow_index].v2.y - arrows[arrow_index].v1.y) + arrows[arrow_index].stimulus_pos,
+	    stimulus.radius,
 	    sequence_color
 	    );
 }
@@ -132,7 +153,7 @@ int main(void)
     int gh = h - (2 * ho);// graph height
 
     // make "graph"'s width dividble by 8 (4 arrows, centered)
-    if ( (w - (2 * wo)) % (NB_ARROWS * 2) != 0) {
+    if ( (w - (2 * wo)) % (NB_PLACEHOLDERS * 2) != 0) {
 	int remaining = (w - (2 * wo)) % 8;
 	if (remaining % 2 == 0) {
 	    wo += remaining / 2;
@@ -145,28 +166,50 @@ int main(void)
     }
      ///////////////////////////////////////////////////////////
     ////////////*ARROWS & DOT PARAMETERS (stimulus)*///////////
-    float arrow_thickness = 0.01 * gw;
-    int dot_padding = (1.0 / 32.0) * gh; // distance from the end of an arrow
-    int dot_radius = ((1.5 * arrow_thickness) + arrow_thickness + (1.5 * arrow_thickness)) / 2; // size of the arrow triangle base (from v1 to v3)
-    Arrow arrows[NB_ARROWS]; // Arrows array
-    for (int i = 0; i < NB_ARROWS; i++) {
-	Arrow a;
-	a.index = i;
-	/*lines*/
-    	a.size.x = arrow_thickness;
-    	a.size.y = gh / 2;
-    	a.pos.x = wo + ((i+1) * gw / (NB_ARROWS * 2)) + ( i * (gw / (NB_ARROWS * 2))) - (a.size.x / 2);
-    	a.pos.y = ho;
-	/*triangles*/
-	Vector2 v1 = { .x = a.pos.x - 1.5 * a.size.x, .y = a.pos.y + a.size.y};
-    	Vector2 v2 = { .x = a.pos.x + (a.size.x / 2), .y = (a.pos.y + a.size.y) + 4 * a.size.x};
-    	Vector2 v3 = { .x = a.pos.x  + a.size.x + 1.5 * a.size.x, .y = a.pos.y + a.size.y};
-	a.v1 = v1;
-	a.v2 = v2;
-	a.v3 = v3;
-	a.dot_padding = dot_padding;
-	a.dot_radius = dot_radius;
-	arrows[i] = a;
+    float unit_width = 0.01 * gw; // elementary brick to construct other elements (arbitrarily related to width)
+    int stimulus_padding  = (1.0 / 32.0) * gh; // distance from the end of an arrow
+
+    Stimulus stimulus;
+    stimulus.radius = ((1.5 * unit_width) + unit_width + (1.5 * unit_width)) / 2; // size of the arrow triangle base (from v1 to v3)
+
+    //int PLACEHOLDERS_TYPE = ARROW;
+    Placeholder placeholders[NB_PLACEHOLDERS]; // Arrows array
+
+    switch (PLACEHOLDERS_TYPE) {
+	case ARROW:
+    	    for (int i = 0; i < NB_PLACEHOLDERS; i++) {
+    	        Placeholder a;
+    	        a.index = i;
+    	        /*lines*/
+    	    	a.size.x = unit_width;
+    	    	a.size.y = gh / 2;
+    	    	a.pos.x = wo + ((i+1) * gw / (NB_PLACEHOLDERS * 2)) + ( i * (gw / (NB_PLACEHOLDERS * 2))) - (a.size.x / 2);
+    	    	a.pos.y = ho;
+    	        /*triangles*/
+    	        Vector2 v1 = { .x = a.pos.x - 1.5 * a.size.x, .y = a.pos.y + a.size.y};
+    	    	Vector2 v2 = { .x = a.pos.x + (a.size.x / 2), .y = (a.pos.y + a.size.y) + 4 * a.size.x};
+    	    	Vector2 v3 = { .x = a.pos.x  + a.size.x + 1.5 * a.size.x, .y = a.pos.y + a.size.y};
+    	        a.v1 = v1;
+    	        a.v2 = v2;
+    	        a.v3 = v3;
+    	        a.stimulus_pos = stimulus_padding + stimulus.radius;
+    	        placeholders[i] = a;
+    	    }
+	    break;
+
+	case HANGMAN:
+    	    for (int i = 0; i < NB_PLACEHOLDERS; i++) {
+    	        Placeholder a;
+    	        a.index = i;
+    	        /*rectangles*/
+    	    	a.size.x = stimulus.radius * 2;
+    	    	a.size.y = stimulus.radius / 4;
+    	    	a.pos.x = wo + ((i+1) * gw / (NB_PLACEHOLDERS * 2)) + ( i * (gw / (NB_PLACEHOLDERS * 2))) - (a.size.x / 2);
+    	    	a.pos.y = ho + gh - ((1.0 / 4.0) * gh);
+    	        a.stimulus_pos = - stimulus_padding - stimulus.radius;
+    	        placeholders[i] = a;
+    	    }
+	    break;
     }
 
      //////////////////////////////////////////////////////////
@@ -243,9 +286,9 @@ int main(void)
 	} else if (current_block_nb < NB_BLOCKS && current_stimulus_nb < NB_STIMULI) {
 	    ClearBackground(BG_COLOR);
 
-	    draw_arrows(arrows);
-	    draw_dot(arrows,item, STIMULI_COLOR); /* draw current stimulus (color choice for debugging only) */
-	    /*draw_dot(arrows,item, current_seq == REGULAR_SEQUENCE ? STIMULI_COLOR : RED);*/
+	    draw_placeholders(placeholders);
+	    draw_stimulus(placeholders,item, STIMULI_COLOR, stimulus); /* draw current stimulus (color choice for debugging only) */
+	    //draw_stimulus(arrows,item, current_seq == REGULAR_SEQUENCE ? STIMULI_COLOR : RED, stimulus);
 
 	    if (waiting_for_answer) {
 		timer_start = get_posix_clock_time(); // Start timer immediately after displaying stimulus
