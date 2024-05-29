@@ -6,18 +6,24 @@
 #include <time.h>
 #include <inttypes.h> // print uint64_t (timer)
 
-#define NB_PLACEHOLDERS     4     // Number of possible items on screen
-#define NB_BLOCKS    	    8     // Blocks are cut with pauses
-#define NB_STIMULI   	    120   // Number of stimuli by block
-#define CONTEXT_SIZE 	    2     // Sequence context
-#define SOA          	    0.250 // Stimulus Onset Asynchrony (in seconds)
-#define P_REG        	    0.85  // Regular sequence probability
 
-#define PLACEHOLDERS_TYPE   HANGMAN
+#define AUTO_GENERATE_SEQUENCES 1      // Not recommanded if NB_LOCATIONS >= 6 (not a smart function)
 
-#define BG_COLOR            BLACK // Background color
+#define NB_LOCATIONS        4          // Stimuli possible locations
+#define NB_BLOCKS    	    8          // Blocks are cut with pauses
+#define NB_STIMULI   	    120        // Number of stimuli by block
+#define CONDITIONAL_ORDER   2          // Conditional order of sequences
+#define SOA          	    0.250      // Stimulus Onset Asynchrony (in seconds)
+#define P_REG        	    0.85       // Regular sequence probability
+#define P_IRREG        	    1 - P_REG  // Regular sequence probability
+#define CONTEXT_SIZE CONDITIONAL_ORDER // Sequence context size depends on conditional order
+
+#define PLACEHOLDERS_TYPE   HANGMAN    // ARROW or HANGMAN
+#define BG_COLOR            BLACK      // Background color
 #define PLACEHOLDERS_COLOR  DARKGRAY
 #define STIMULI_COLOR       WHITE
+
+#define DEBUG 0
 
 ///////////////////////////////////////////////////////////
 /*
@@ -38,48 +44,47 @@ enum {
 };
 
 typedef struct Placeholder {
-    Vector2 size; // vertical line (if arrow) / rect width (if hangman)
-    Vector2 pos;  // placeholder position
-    int index;    // Placeholders are indexed given their position from left to right on screen
-    int stimulus_pos; // where to place the stimulus relatively to placeholder
-    Vector2 v1;   // (arrows only) left vertex of the arrow triangle
-    Vector2 v2;   // (arrows only) center vertex of the arrow triangle
-    Vector2 v3;   // (arrows only) right vertex of the arrow triangle
-    int type;     // stores its own type (arrow, hangman, etc.)
+    Vector2 size;     // Vertical line (if arrow) / rect width (if hangman)
+    Vector2 pos;      // On screen position
+    int index;        // Placeholders are indexed given their position from left to right on screen
+    int stimulus_pos; // Relative stimulus' position to placeholder
+    int type;         // Placeholder own type (ARROW, HANGMAN, etc.)
+    Vector2 v1;       // (for ARROWS only) left vertex of the arrow triangle
+    Vector2 v2;       // (for ARROWS only) center vertex of the arrow triangle
+    Vector2 v3;       // (for ARROWS only) right vertex of the arrow triangle
 } Placeholder;
 
 typedef struct Stimulus {
-    int radius; // stimuli are circle for now
+    int radius; // Stimuli are just circle for now
 } Stimulus;
 
-void draw_placeholders(Placeholder *ph)
-{
+void draw_placeholders(Placeholder *ph) {
     switch (ph[0].type) {
 	case ARROW:
-	    for (int i = 0; i < NB_PLACEHOLDERS; i++) {
+	    for (int i = 0; i < NB_LOCATIONS; i++) {
     	        DrawRectangleV(ph[i].pos, ph[i].size,    PLACEHOLDERS_COLOR);
     	        DrawTriangle(ph[i].v1,ph[i].v2,ph[i].v3, PLACEHOLDERS_COLOR);
     	    }
 	    break;
 	case HANGMAN:
-	    for (int i = 0; i < NB_PLACEHOLDERS; i++) {
+	    for (int i = 0; i < NB_LOCATIONS; i++) {
     	        DrawRectangleV(ph[i].pos, ph[i].size, PLACEHOLDERS_COLOR);
     	    }
 	    break;
     }
 }
 
-void draw_stimulus(Placeholder *arrows, int arrow_index, Color sequence_color, Stimulus stimulus)
-{
+void draw_stimulus(Placeholder *arrows, int arrow_index, Color color, Stimulus stimulus) {
     DrawCircle(
 	    arrows[arrow_index].pos.x + (arrows[arrow_index].size.x / 2),
 	    arrows[arrow_index].pos.y + arrows[arrow_index].size.y + (arrows[arrow_index].v2.y - arrows[arrow_index].v1.y) + arrows[arrow_index].stimulus_pos,
 	    stimulus.radius,
-	    sequence_color
+	    color
 	    );
 }
 
-int next_expected(int *context, int choice, int *regular_sequence, int *irregular_sequence, size_t size_context, size_t size_sequence) { // given a context and a sequence, find expected value
+int next_expected(int *context, int choice, int *regular_sequence, int *irregular_sequence, size_t size_context, size_t size_sequence) {
+    /* Given a context and a sequence, find expected value */
     int *sequence;
     if (choice == REGULAR_SEQUENCE) { sequence = regular_sequence; }
     else { sequence = irregular_sequence;}
@@ -94,12 +99,27 @@ int next_expected(int *context, int choice, int *regular_sequence, int *irregula
     return -1;
 }
 
-void update_context(int *context, size_t size_context, int current_value)
-{
+void update_context(int *context, size_t size_context, int current_value) {
     for (int i = 0; i < size_context - 1; i++) {
 	context[i] = context[i+1];
     }
     context[size_context - 1] = current_value;
+}
+
+int contexts_collide(int *seq1, int *seq2, size_t size_context, size_t size_sequence) {
+    for (int i = 0; i < size_sequence; i++) {
+	for (int j = 0; j < size_sequence; j++) {
+	    for (int k = 0; k < CONTEXT_SIZE; k++) {
+		if (seq1[(i+k) % size_sequence] != seq2[(j+k) % size_sequence]) {break;}
+		if (k == CONTEXT_SIZE - 1) {
+		    if (seq1[(i+k+1) % size_sequence] == seq2[(j+k+1) % size_sequence]) {
+			return -1; // same expectation for same context. mustn't happen
+		    }
+		}
+	    }
+	}
+    }
+    return 0;
 }
 
 int choose_sequence(void) {
@@ -110,11 +130,81 @@ int choose_sequence(void) {
 	}
 }
 
-uint64_t get_posix_clock_time(void)
-{
+uint64_t get_posix_clock_time(void) {
     struct timespec ts;
     if (clock_gettime (CLOCK_MONOTONIC, &ts) == 0) { return (uint64_t) (ts.tv_sec * 1000000 + ts.tv_nsec / 1000); }
     else { return 0; }
+}
+
+int generate_sequence(int *sequence) {
+    /* Dumb function to generate random sequences */
+    if (CONDITIONAL_ORDER == 1) {
+	int selected_indexes[NB_LOCATIONS];
+	int new_sequence[NB_LOCATIONS];
+	int added = 0;
+	while (added < NB_LOCATIONS) {
+	    int random_index = rand() % NB_LOCATIONS;
+	    int add = 1;
+	    for (int j = 0; j < added; j++) {
+		if (selected_indexes[j] == random_index) add = 0;
+	    }
+	    if (add == 1) {
+		selected_indexes[added] = random_index;
+		sequence[added] = random_index;
+		added++;
+	    }
+	}
+	return 0;
+    }
+    int  iterations = 0; //arbitrarily stops when iterations are too high (DUMB)
+    int  max_nb_context = NB_LOCATIONS * (NB_LOCATIONS - 1);
+    char contexts[max_nb_context][CONTEXT_SIZE * CONTEXT_SIZE];
+    int  index = 0;
+    for (int i = 0; i < NB_LOCATIONS; i++) {
+        for (int j = 0; j < NB_LOCATIONS ; j++) {
+    	if (i != j) {
+    	    char c[CONTEXT_SIZE];
+    	    snprintf(c, CONTEXT_SIZE * CONTEXT_SIZE, "%d%d", i, j);
+    	    snprintf(contexts[index], CONTEXT_SIZE * CONTEXT_SIZE, c);
+    	    index++;
+	   }
+        }
+    }
+    char random_arrangement[max_nb_context][CONTEXT_SIZE * CONTEXT_SIZE]; // random arrangement of context (01 -> 12 -> 20 -> 03 ...)
+    int  grabbed_indexes[max_nb_context];
+    int selected = 0;
+    int collision = 0;
+    while ( selected < max_nb_context) {
+        if (iterations++ > max_nb_context * max_nb_context * max_nb_context) { return -1; };
+        int random_index = rand() % max_nb_context;
+        for (int i = 0; i < selected; i++) { if (grabbed_indexes[i] == random_index) continue; }
+        char s[CONTEXT_SIZE*CONTEXT_SIZE];
+        snprintf(s, CONTEXT_SIZE * CONTEXT_SIZE, contexts[random_index]);
+        /*check that we haven't stored that context already*/
+        for (int i = 0; i < selected; i++) {
+	   if (strcmp(s, random_arrangement[i]) == 0) {
+    	       collision = 1;
+    	       break;
+	   }
+        }
+        if (collision == 1) { collision = 0; continue; }
+        /*check this context is linkable with the previous one*/
+        if (selected > 0) {
+	   if (s[0] != random_arrangement[selected-1][CONTEXT_SIZE-1]) {
+    	       collision = 0;
+    	       continue;
+	   }
+        }
+        /*context is valid, append it and continue*/
+        snprintf(random_arrangement[selected], CONTEXT_SIZE * CONTEXT_SIZE, s);
+        collision = 0;
+        grabbed_indexes[selected] = random_index;
+        selected++;
+    }
+    for (int i = 0; i < max_nb_context; i++) {
+        sequence[i] = random_arrangement[i][0] - '0';
+    }
+    return 0;
 }
 
 int main(void)
@@ -154,7 +244,7 @@ int main(void)
     int gh = h - (2 * ho);// graph height
 
     // make "graph"'s width dividble by 8 (4 arrows, centered)
-    if ( (w - (2 * wo)) % (NB_PLACEHOLDERS * 2) != 0) {
+    if ( (w - (2 * wo)) % (NB_LOCATIONS * 2) != 0) {
 	int remaining = (w - (2 * wo)) % 8;
 	if (remaining % 2 == 0) {
 	    wo += remaining / 2;
@@ -174,18 +264,18 @@ int main(void)
     stimulus.radius = ((1.5 * unit_width) + unit_width + (1.5 * unit_width)) / 2; // size of the arrow triangle base (from v1 to v3)
 
     //int PLACEHOLDERS_TYPE = ARROW;
-    Placeholder placeholders[NB_PLACEHOLDERS]; // Arrows array
+    Placeholder placeholders[NB_LOCATIONS]; // Arrows array
 
     switch (PLACEHOLDERS_TYPE) {
 	case ARROW:
-    	    for (int i = 0; i < NB_PLACEHOLDERS; i++) {
+    	    for (int i = 0; i < NB_LOCATIONS; i++) {
     	        Placeholder a;
 		a.type = ARROW;
     	        a.index = i;
     	        /*lines*/
     	    	a.size.x = unit_width;
     	    	a.size.y = gh / 2;
-    	    	a.pos.x = wo + ((i+1) * gw / (NB_PLACEHOLDERS * 2)) + ( i * (gw / (NB_PLACEHOLDERS * 2))) - (a.size.x / 2);
+    	    	a.pos.x = wo + ((i+1) * gw / (NB_LOCATIONS * 2)) + ( i * (gw / (NB_LOCATIONS * 2))) - (a.size.x / 2);
     	    	a.pos.y = ho;
     	        /*triangles*/
     	        Vector2 v1 = { .x = a.pos.x - 1.5 * a.size.x, .y = a.pos.y + a.size.y};
@@ -200,14 +290,14 @@ int main(void)
 	    break;
 
 	case HANGMAN:
-    	    for (int i = 0; i < NB_PLACEHOLDERS; i++) {
+    	    for (int i = 0; i < NB_LOCATIONS; i++) {
     	        Placeholder a;
 		a.type = HANGMAN;
     	        a.index = i;
     	        /*rectangles*/
     	    	a.size.x = stimulus.radius * 2;
     	    	a.size.y = stimulus.radius / 4;
-    	    	a.pos.x = wo + ((i+1) * gw / (NB_PLACEHOLDERS * 2)) + ( i * (gw / (NB_PLACEHOLDERS * 2))) - (a.size.x / 2);
+    	    	a.pos.x = wo + ((i+1) * gw / (NB_LOCATIONS * 2)) + ( i * (gw / (NB_LOCATIONS * 2))) - (a.size.x / 2);
     	    	a.pos.y = ho + gh - ((1.0 / 4.0) * gh);
     	        a.stimulus_pos = - stimulus_padding - stimulus.radius;
     	        placeholders[i] = a;
@@ -217,11 +307,23 @@ int main(void)
 
      //////////////////////////////////////////////////////////
     ////////////////*PREPARE SEQUENCES*///////////////////////
-    const int SEQ1[] = {0,1,0,3,2,1,3,0,2,3,1,2}; // learning sequence 1
-    const int SEQ2[] = {2,0,3,1,0,2,1,2,3,0,1,3}; // learning sequence 2
+    int seq_length = CONDITIONAL_ORDER == 1 ? NB_LOCATIONS : NB_LOCATIONS * (NB_LOCATIONS - 1);
+    int SEQ1[seq_length];
+    int SEQ2[seq_length];
+
+    if (AUTO_GENERATE_SEQUENCES == 1) {  	// costly function
+	while (generate_sequence(SEQ1) < 0) {}; // sequence 1
+	while (generate_sequence(SEQ2) < 0) {}; // sequence 2
+	do { generate_sequence(SEQ2); } 	// while sequences are equal OR same context gives same output, continue.
+	    while (memcmp(SEQ1, SEQ2, sizeof(SEQ1)) == 0 || contexts_collide(SEQ1, SEQ2, CONTEXT_SIZE, seq_length) != 0);
+    } else { // use default sequence==s
+	int dSEQ1[] = {0,1,0,3,2,1,3,0,2,3,1,2}; // default sequence 1
+    	int dSEQ2[] = {2,0,3,1,0,2,1,2,3,0,1,3}; // default sequence 2
+	for (int i = 0; i < seq_length; i++) { SEQ1[i] = dSEQ1[i]; SEQ2[i] = dSEQ2[i]; }
+    }
 
     size_t SEQUENCE_SIZE = sizeof(SEQ1) / sizeof(SEQ1[0]); // sequence's size
-    int    RSEQ[SEQUENCE_SIZE]; // regular learning sequence (85%)
+    int    RSEQ[SEQUENCE_SIZE]; // regular learning sequence (with probability P_REG)
     int    ISEQ[SEQUENCE_SIZE]; // irregular learning sequence (15%)
 
     //int LEARNING_SEQ = 2; // choose between 1 and 2
@@ -239,6 +341,13 @@ int main(void)
 	    ISEQ[i] = SEQ1[i];
 	}
     }
+
+    /*Prepare sequences strings for logfile*/
+    int  length = CONDITIONAL_ORDER == 1 ? NB_LOCATIONS : NB_LOCATIONS * (NB_LOCATIONS - 1);
+    char regular_string[length];
+    char irregular_string[length];
+    for (int i=0; i<length; i++) { sprintf(&regular_string[i],   "%d", RSEQ[i]); }
+    for (int i=0; i<length; i++) { sprintf(&irregular_string[i], "%d", ISEQ[i]); }
 
      //////////////////////////////////////////////////////////
     /////////////////*SET CURRENT CONTEXT*////////////////////
@@ -275,7 +384,7 @@ int main(void)
     snprintf(participant_file, sizeof(participant_file), "result_%d_%s.txt", random_id, date);
 
     fp = fopen(participant_file, "a");
-    fprintf(fp, "block;item;reaction_time;time_from_start;answer;reg_item;irreg_item;shown_item;seq_shown\n");
+    fprintf(fp, "block;item;reaction_time;time_from_start;answer;reg_item;irreg_item;shown_item;seq_shown;%s;%s\n",regular_string,irregular_string);
 
      //////////////////////////////////////////////////////////
     /////////////////////*SETUP WINDOW*///////////////////////
@@ -288,6 +397,13 @@ int main(void)
 	/*check state of block*/
 	if (!task_started) {
 	    ClearBackground(BG_COLOR); // Clear previous stimulus
+
+	    /*If DEBUG mode, displays REG and IRREG sequences on screen.*/
+	    if (DEBUG) {
+		DrawText(TextFormat("REG: %s",regular_string), 0, 0, 50 * factor / 100, RED);
+		DrawText(TextFormat("IRR: %s",irregular_string), 0, 50 * factor / 100, 50 * factor / 100, RED);
+	    }
+
 	    char msg[] = "Ready to suffer? :')\n\n\nPress 'Space' to confirm.";
 	    int font_size = 50 * factor / 100;
 	    DrawText(msg,
@@ -303,8 +419,11 @@ int main(void)
 	    ClearBackground(BG_COLOR);
 
 	    draw_placeholders(placeholders);
-	    draw_stimulus(placeholders,item, STIMULI_COLOR, stimulus); /* draw current stimulus (color choice for debugging only) */
-	    //draw_stimulus(arrows,item, current_seq == REGULAR_SEQUENCE ? STIMULI_COLOR : RED, stimulus);
+	    if (DEBUG) {
+		draw_stimulus(placeholders,item, current_seq == REGULAR_SEQUENCE ? STIMULI_COLOR : RED, stimulus);
+	    } else {
+		draw_stimulus(placeholders,item, STIMULI_COLOR, stimulus); /* draw current stimulus (color choice for debugging only) */
+	    }
 
 	    if (waiting_for_answer) {
 		timer_start = get_posix_clock_time(); // Start timer immediately after displaying stimulus
@@ -316,7 +435,6 @@ int main(void)
 		timer_stop      = get_posix_clock_time();       // immediately "stop" timer after participant's answer
 		time_diff       = timer_stop - timer_start;     // elapsed time since stimulus
 		time_diff_total = timer_stop - time_task_start; // elapsed time since beginning of task
-		//printf("%" PRIu64 "\n", time_diff);
 
 		answer = GetKeyPressed();
 		if      (answer == KEY_C) { answer = 0; }
@@ -324,8 +442,12 @@ int main(void)
 		else if (answer == KEY_B) { answer = 2; }
 		else if (answer == KEY_N) { answer = 3; }
 
-		// block; item; time_diff; time_diff_total; answer; expected_reg; expected_irreg; showed; current_seq (reg or irreg)
-		fprintf(fp, "%d;%d;%"PRIu64";%"PRIu64";%d;%d;%d;%d;%d\n", current_block_nb, current_stimulus_nb, time_diff, time_diff_total, answer, reg_item, irreg_item, item, current_seq); // write to log file
+		fprintf(fp, "%d;%d;%"PRIu64";%"PRIu64";%d;%d;%d;%d;%d\n",
+			current_block_nb, current_stimulus_nb,
+			time_diff, time_diff_total,
+			answer,
+			reg_item, irreg_item,
+			item, current_seq); // write to log file
 
 	        update_context(context, CONTEXT_SIZE, item);
 	        reg_item    = next_expected(context, REGULAR_SEQUENCE, RSEQ, ISEQ, CONTEXT_SIZE, SEQUENCE_SIZE);
