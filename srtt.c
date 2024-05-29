@@ -13,7 +13,7 @@
 #define SOA          	    0.250 // Stimulus Onset Asynchrony (in seconds)
 #define P_REG        	    0.85  // Regular sequence probability
 
-#define PLACEHOLDERS_TYPE   HANGMAN // Choice ARROW, HANGMAN
+#define PLACEHOLDERS_TYPE   HANGMAN
 
 #define BG_COLOR            BLACK // Background color
 #define PLACEHOLDERS_COLOR  DARKGRAY
@@ -119,6 +119,7 @@ uint64_t get_posix_clock_time(void)
 
 int main(void)
 {
+    srand(time(NULL)); // random seed for random functions
      //////////////////////////////////////////////////////////
     ///////////////* TIME SUPPORT (LINUX)*////////////////////
     uint64_t timer_start, timer_stop;
@@ -179,6 +180,7 @@ int main(void)
 	case ARROW:
     	    for (int i = 0; i < NB_PLACEHOLDERS; i++) {
     	        Placeholder a;
+		a.type = ARROW;
     	        a.index = i;
     	        /*lines*/
     	    	a.size.x = unit_width;
@@ -200,6 +202,7 @@ int main(void)
 	case HANGMAN:
     	    for (int i = 0; i < NB_PLACEHOLDERS; i++) {
     	        Placeholder a;
+		a.type = HANGMAN;
     	        a.index = i;
     	        /*rectangles*/
     	    	a.size.x = stimulus.radius * 2;
@@ -222,15 +225,15 @@ int main(void)
     int    ISEQ[SEQUENCE_SIZE]; // irregular learning sequence (15%)
 
     //int LEARNING_SEQ = 2; // choose between 1 and 2
-    int LEARNING_SEQ = (rand() < RAND_MAX * 0.5) ? 1 : 2; // randomize regular sequence selection
+    int LEARNING_SEQ = (rand() < RAND_MAX * 0.5) ? 0 : 1; // randomize regular sequence selection
 
-    if      (LEARNING_SEQ == 1) {
+    if      (LEARNING_SEQ == 0) {
 	for (int i = 0; i < SEQUENCE_SIZE; i++) {
 	    RSEQ[i] = SEQ1[i];
 	    ISEQ[i] = SEQ2[i];
 	}
     }
-    else if (LEARNING_SEQ == 2) {
+    else if (LEARNING_SEQ == 1) {
 	for (int i = 0; i < SEQUENCE_SIZE; i++) {
 	    RSEQ[i] = SEQ2[i];
 	    ISEQ[i] = SEQ1[i];
@@ -240,25 +243,38 @@ int main(void)
      //////////////////////////////////////////////////////////
     /////////////////*SET CURRENT CONTEXT*////////////////////
     int context[CONTEXT_SIZE];
-    for (int i = 0; i < CONTEXT_SIZE; i++) { context[i] = RSEQ[i % SEQUENCE_SIZE]; }
+    /*randomly select the sequence to start with (according to desired probabilities; e.g. P_REG = .85)*/
+    int current_seq = (rand() < RAND_MAX * P_REG) ? REGULAR_SEQUENCE : IRREGULAR_SEQUENCE;
 
-    int current_seq = REGULAR_SEQUENCE; // start with regular sequence (TODO randomize)
+    /*randomly select a context to start with*/
+    int random_index = rand() % (SEQUENCE_SIZE + 1);
+    for (int i = 0; i < CONTEXT_SIZE; i++) { context[i] = RSEQ[(i + random_index) % SEQUENCE_SIZE]; }
+
     int item        = next_expected(context, current_seq       , RSEQ, ISEQ, CONTEXT_SIZE, SEQUENCE_SIZE);
     int reg_item    = next_expected(context, REGULAR_SEQUENCE  , RSEQ, ISEQ, CONTEXT_SIZE, SEQUENCE_SIZE); // to keep track of what is really expected
     int irreg_item  = next_expected(context, IRREGULAR_SEQUENCE, RSEQ, ISEQ, CONTEXT_SIZE, SEQUENCE_SIZE); // to keep track of what is really expected
 
-    int current_block_nb   = 0;
-    int current_stimulus_nb = 0;
-    int task_started = 0;
-    int waiting_for_answer = 1;
-    int answer;
+    int current_block_nb    = 0; // from 0 to nb_blocks - 1
+    int current_stimulus_nb = 0; // from 0 to stimuli by block - 1
+    int task_started        = 0;
+    int waiting_for_answer  = 1;
+    int answer; // participant's answer
 
      //////////////////////////////////////////////////////////
     ///////////////* SET UP LOG FILE *////////////////////////
 
     FILE *fp;
-    char logfile_name[] = "logfile.txt"; // TODO: adjust this
-    fp = fopen(logfile_name, "a");
+
+    char date[50]; // YYYY-MM-DD_hh-mm-ss (to store in participant's results' file)
+    time_t now = time(NULL);
+    strftime(date, sizeof(date)-1, "%Y-%m-%d_%H-%M-%S", localtime(&now));
+
+    int    random_id = rand() % 999999; // a million ID should be enough...
+
+    char   participant_file[50]; // result_RANDOMID_YYYY-MM-DD_hh-mm-ss.txt
+    snprintf(participant_file, sizeof(participant_file), "result_%d_%s.txt", random_id, date);
+
+    fp = fopen(participant_file, "a");
     fprintf(fp, "block;item;reaction_time;time_from_start;answer;reg_item;irreg_item;shown_item;seq_shown\n");
 
      //////////////////////////////////////////////////////////
@@ -271,7 +287,7 @@ int main(void)
 
 	/*check state of block*/
 	if (!task_started) {
-	    ClearBackground(BG_COLOR); // Clear previous dot
+	    ClearBackground(BG_COLOR); // Clear previous stimulus
 	    char msg[] = "Ready to suffer? :')\n\n\nPress 'Space' to confirm.";
 	    int font_size = 50 * factor / 100;
 	    DrawText(msg,
@@ -295,7 +311,7 @@ int main(void)
 		waiting_for_answer = 0;
 	    }
 
-	    /* Update dots each time an answer*/
+	    /* Update stimulus each time an answer*/
 	    if (IsKeyDown(KEY_C) || IsKeyDown(KEY_V) || IsKeyDown(KEY_B) || IsKeyDown(KEY_N)) {
 		timer_stop      = get_posix_clock_time();       // immediately "stop" timer after participant's answer
 		time_diff       = timer_stop - timer_start;     // elapsed time since stimulus
@@ -322,7 +338,7 @@ int main(void)
 	    }
 
 	} else if (current_block_nb < NB_BLOCKS - 1 ) {
-	    ClearBackground(BG_COLOR); // Clear previous dot
+	    ClearBackground(BG_COLOR); // Clear previous stimulus
 	    char msg[] = "Pause. Press 'Space' to continue.";
 	    int font_size = 50 * factor / 100;
 	    DrawText(msg,
@@ -336,7 +352,7 @@ int main(void)
 		waiting_for_answer = 1;
 	    }
 	} else { // nb blocks >= 8
-	    ClearBackground(BG_COLOR); // Clear previous dot
+	    ClearBackground(BG_COLOR); // Clear previous stimulus
 	    char msg[] = "End of SRTT.\n\nThanks for participating :^)";
 	    int font_size = 50 * factor / 100;
 	    DrawText(msg,
