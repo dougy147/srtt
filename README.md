@@ -2,7 +2,13 @@ Serial Reaction Time Task with a probabilistic sequence, similar to [Kaufman et 
 
 ![](assets/demo.gif)
 
+```console
+$ gcc -o srtt srtt.c -lraylib
+```
+
 Default keys: `c`, `v`, `b`, `n`.
+
+Reaction time are measured in microseconds.
 
 ```console
 $ cat logfile.txt
